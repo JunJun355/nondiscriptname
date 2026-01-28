@@ -117,8 +117,8 @@ def setup_classes():
             lon = 0
             
         # Time
-        start = input_with_default("  Start Time (HH:MM:SS)", current_info.get("start_time", "09:00:00"))
-        end = input_with_default("  End Time (HH:MM:SS)", current_info.get("end_time", "10:15:00"))
+        start = input_with_default("  Start Time (HH:MM:SS)", current_info.get("start_time", ""))
+        end = input_with_default("  End Time (HH:MM:SS)", current_info.get("end_time", ""))
         
         # Save to dict
         classes[class_name] = {

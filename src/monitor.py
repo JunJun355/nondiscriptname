@@ -63,10 +63,22 @@ def handle_poll_question(page, class_name: str) -> None:
         log(f"{confidence_emoji} Gemma Response: Confidence={answer.confidence}, Suggested=Option {answer.option_number}", class_name)
         selected_option_index = answer.option_number - 1
 
-    # iMessage fallback
+    # Legacy/Blocking iMessage block removed.
+    # Flow should be: Ask Gemma -> Click Default -> Start Async Loop
+    pass
+            
+    # Always click Gemma's answer first (even if Low Confidence) to ensure baseline participation
+    if selected_option_index is not None:
+        log(f"   Clicking initial AI choice: Option {selected_option_index + 1}...", class_name)
+        if browser.click_option(page, selected_option_index + 1):
+             pass
+        else:
+             log(f"❌ Failed to click option {selected_option_index + 1}", class_name)
+
+    # iMessage fallback loop (if needed)
     if answer.confidence == "low" or answer.status == AnswerStatus.ERROR:
         try:
-            from imessage import load_config, send_message, wait_for_reply
+            from imessage import load_config, send_message, get_latest_message
             config = load_config()
             recipient = config.get("recipient_address")
             
@@ -80,29 +92,55 @@ def handle_poll_question(page, class_name: str) -> None:
                 if send_message(recipient, msg_text):
                     log(f"📱 Sent iMessage to {recipient}", class_name)
                     
-                    reply = wait_for_reply(recipient)
-                    if reply and reply.strip().isdigit():
-                        choice = int(reply.strip())
-                        if 1 <= choice <= len(options):
-                            log(f"📩 Friend replied: Option {choice}", class_name)
-                            selected_option_index = choice - 1
-                        else:
-                             log(f"⚠️ Invalid reply choice: {reply}", class_name)
-                    else:
-                        log("⏰ No validity reply from friend", class_name)
+                    # Enter loop to allow changing answer until question ends
+                    initial_hash = browser.get_page_content_hash(page)
+                    
+                    # Get baseline message ID to ignore old messages
+                    latest = get_latest_message(recipient)
+                    last_seen_rowid = latest[1] if latest else 0
+                    
+                    log(f"⏳ Waiting for replies from {recipient} (loops until next question)...", class_name)
+                    
+                    while not _stop_requested:
+                        # 1. Check if page changed (question ended)
+                        current_hash = browser.get_page_content_hash(page)
+                        if current_hash != initial_hash:
+                            log("🔄 Page content changed, stopping iMessage listener.", class_name)
+                            break
+                            
+                        # 2. Check for NEW messages
+                        current_msg = get_latest_message(recipient)
+                        if current_msg and current_msg[1] > last_seen_rowid:
+                            reply = current_msg[0]
+                            last_seen_rowid = current_msg[1]
+                            
+                            log(f"📩 Received: {reply}", class_name)
+                            
+                            if reply.strip().isdigit():
+                                choice = int(reply.strip())
+                                if 1 <= choice <= len(options):
+                                    log(f"📩 Friend replied: Option {choice}", class_name)
+                                    
+                                    # Always try to unclick previous before clicking new (no index check needed)
+                                    log(f"   Unclicking previous selection(s)...", class_name)
+                                    browser.unclick_current_option(page)
+                                    
+                                    # Click new
+                                    log(f"   Clicking option {choice}...", class_name)
+                                    if browser.click_option(page, choice):
+                                         log(f"✅ Changed answer to Option {choice}", class_name)
+                                         selected_option_index = choice - 1 # Update selected_option_index
+                                    else:
+                                         log(f"❌ Failed to click option {choice}", class_name)
+                                else:
+                                    log(f"⚠️ Invalid choice: {choice}", class_name)
+                        
+                        time_module.sleep(2)
             else:
                 log("⚠️ No iMessage recipient configured", class_name)
                 
         except Exception as e:
             log(f"❌ iMessage error: {e}", class_name)
-            
-    # Final click action
-    if selected_option_index is not None:
-        if browser.click_option(page, selected_option_index + 1):
-             # log(f"🖱️  Clicked option {selected_option_index + 1}", class_name) # Reducing clutter
-             pass
-        else:
-             log(f"❌ Failed to click option {selected_option_index + 1}", class_name)
 
 
 def monitor_page_changes(page, class_name: str, class_info: dict) -> None:

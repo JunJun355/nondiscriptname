@@ -98,3 +98,23 @@ def click_option(page: Page, option_number: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def unclick_current_option(page: Page) -> bool:
+    """
+    Find and click 'undo' buttons for ANY currently selected options.
+    Returns True if at least one undo button was clicked.
+    """
+    try:
+        undo_buttons = page.query_selector_all(".component-response-multiple-choice__option__undo")
+        clicked_any = False
+        
+        for btn in undo_buttons:
+            if btn.is_visible():
+                btn.click()
+                clicked_any = True
+                # Keep going to clear ALL selections (safe for multi-select too)
+                
+        return clicked_any
+    except Exception:
+        return False
