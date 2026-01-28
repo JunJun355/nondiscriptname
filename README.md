@@ -21,16 +21,15 @@ echo "your-api-key-here" > data/API_KEY_GEMINI
 ### 3. Configure Your Classes
 Edit `data/classes.json` with your class details:
 ```json
-[
-  {
-    "name": "CS_101",
-    "section": "professor id",
-    "longitude": -76.4735,
-    "latitude": 42.4534,
-    "start_time": "10:00:00",
-    "end_time": "11:00:00"
-  }
-]
+{
+    "CS_4782": {
+        "section": "jaywujun701",
+        "longitude": 42.447083,
+        "latitude": -76.482222,
+        "start_time": "",
+        "end_time": ""
+    }
+}
 ```
 - `section`: The presenter's PollEV username (from pollev.com/**section**)
 - `longitude/latitude`: GPS coordinates to spoof (for geofenced polls)
