@@ -1,1 +1,1 @@
-Just API Keys (not for you mMmm), location data, and whatever else.
+Just API Keys (not for you mMmm), location data, session tokens, and whatever else.
