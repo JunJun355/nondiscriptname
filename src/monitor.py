@@ -101,6 +101,9 @@ def handle_poll_question(page, class_name: str) -> None:
                     
                     log(f"⏳ Waiting for replies from {recipient} (loops until next question)...", class_name)
                     
+                    error_count = 0
+                    MAX_ERRORS = 3
+
                     while not _stop_requested:
                         # 1. Check if page changed (question ended)
                         current_hash = browser.get_page_content_hash(page)
@@ -109,31 +112,41 @@ def handle_poll_question(page, class_name: str) -> None:
                             break
                             
                         # 2. Check for NEW messages
-                        current_msg = get_latest_message(recipient)
-                        if current_msg and current_msg[1] > last_seen_rowid:
-                            reply = current_msg[0]
-                            last_seen_rowid = current_msg[1]
+                        try:
+                            current_msg = get_latest_message(recipient)
+                            # Reset error count on success
+                            error_count = 0
                             
-                            log(f"📩 Received: {reply}", class_name)
-                            
-                            if reply.strip().isdigit():
-                                choice = int(reply.strip())
-                                if 1 <= choice <= len(options):
-                                    log(f"📩 Friend replied: Option {choice}", class_name)
-                                    
-                                    # Always try to unclick previous before clicking new (no index check needed)
-                                    log(f"   Unclicking previous selection(s)...", class_name)
-                                    browser.unclick_current_option(page)
-                                    
-                                    # Click new
-                                    log(f"   Clicking option {choice}...", class_name)
-                                    if browser.click_option(page, choice):
-                                         log(f"✅ Changed answer to Option {choice}", class_name)
-                                         selected_option_index = choice - 1 # Update selected_option_index
+                            if current_msg and current_msg[1] > last_seen_rowid:
+                                reply = current_msg[0]
+                                last_seen_rowid = current_msg[1]
+                                
+                                log(f"📩 Received: {reply}", class_name)
+                                
+                                if reply.strip().isdigit():
+                                    choice = int(reply.strip())
+                                    if 1 <= choice <= len(options):
+                                        log(f"📩 Friend replied: Option {choice}", class_name)
+                                        
+                                        # Always try to unclick previous before clicking new (no index check needed)
+                                        log(f"   Unclicking previous selection(s)...", class_name)
+                                        browser.unclick_current_option(page)
+                                        
+                                        # Click new
+                                        log(f"   Clicking option {choice}...", class_name)
+                                        if browser.click_option(page, choice):
+                                             log(f"✅ Changed answer to Option {choice}", class_name)
+                                             selected_option_index = choice - 1 # Update selected_option_index
+                                        else:
+                                             log(f"❌ Failed to click option {choice}", class_name)
                                     else:
-                                         log(f"❌ Failed to click option {choice}", class_name)
-                                else:
-                                    log(f"⚠️ Invalid choice: {choice}", class_name)
+                                        log(f"⚠️ Invalid choice: {choice}", class_name)
+                        except Exception as loop_e:
+                            error_count += 1
+                            log(f"⚠️ iMessage check failed ({error_count}/{MAX_ERRORS}): {loop_e}", class_name)
+                            if error_count >= MAX_ERRORS:
+                                log("🛑 iMessage listener stopped: Too many consecutive errors. Check permissions!", class_name)
+                                break
                         
                         time_module.sleep(2)
             else:
@@ -141,6 +154,7 @@ def handle_poll_question(page, class_name: str) -> None:
                 
         except Exception as e:
             log(f"❌ iMessage error: {e}", class_name)
+            log("❌ Check for Full Disk Access permissions", class_name)
 
 
 def monitor_page_changes(page, class_name: str, class_info: dict) -> None:

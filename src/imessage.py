@@ -139,8 +139,8 @@ def get_latest_message(recipient: str) -> tuple[str, int] | None:
         return None
         
     except Exception as e:
-        print(f"❌ Database error: {e}")
-        return None
+        # print(f"❌ Database error: {e}")
+        raise Exception(f"Database error: {e}")
 
 
 def wait_for_reply(recipient: str, timeout_seconds: int = 6000, poll_interval: int = 2) -> str | None:

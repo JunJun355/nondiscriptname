@@ -1,6 +1,6 @@
 # Skipping Lecture
 
-Automated PollEV answering bot with AI support and iMessage fallback.
+Automated PollEV answering bot with AI support and iMessage fallback. Supported on Mac only.
 
 ## Quick Start
 
@@ -18,6 +18,11 @@ Automated PollEV answering bot with AI support and iMessage fallback.
    ```bash
    python run.py -test
    ```
+
+   > [!IMPORTANT]
+   > **Full Disk Access Required**\
+   > You MUST grant your command line tool `Full Disk Access` in System Settings > Privacy & Security > Full Disk Access.\
+   > Recommended to download an alternative terminal emulator such as iTerm2. This is required to read the iMessage database!
 
 ## Detailed System Behavior
 
