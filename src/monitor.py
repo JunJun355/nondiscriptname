@@ -14,12 +14,12 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import sync_playwright
 
-from config import POLLEV_BASE_URL, SESSION_STATE_DIR
+from config import POLLEV_BASE_URL
 from utils import load_classes, is_within_class_time, parse_time
 from gemma import ask_gemma, notify_low_confidence, AnswerStatus
-from pollev_parser import extract_from_page, click_option
+import browser
 
 # Global flag for graceful shutdown
 _stop_requested = False
@@ -30,101 +30,91 @@ _sessions_lock = threading.Lock()
 
 def log(message: str, class_name: str = None) -> None:
     """Print a timestamped log message."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    timestamp = datetime.now().strftime("%H:%M:%S")
     prefix = f"[{class_name}] " if class_name else ""
     print(f"[{timestamp}] {prefix}{message}")
 
 
-def create_geolocation_context(playwright, class_info: dict):
-    """Create a browser context with spoofed geolocation."""
-    storage_path = SESSION_STATE_DIR / "state.json"
-    
-    if not storage_path.exists():
-        raise FileNotFoundError(
-            f"Session state not found at {storage_path}. "
-            "Please run login.py first to save your session."
-        )
-    
-    browser = playwright.chromium.launch(headless=False)
-    
-    lat = class_info.get("latitude", 0)
-    lon = class_info.get("longitude", 0)
-    
-    # Detect if they're swapped (latitude should be positive ~42, longitude negative ~-76)
-    if lon > 0 and lat < 0:
-        lat, lon = lon, lat
-    
-    context = browser.new_context(
-        storage_state=str(storage_path),
-        geolocation={"latitude": lat, "longitude": lon},
-        permissions=["geolocation"],
-    )
-    
-    return browser, context
-
-
-def get_page_content_hash(page: Page) -> str:
-    """Get a hash of the main content area to detect changes."""
-    try:
-        content = page.evaluate("""
-            () => {
-                const main = document.querySelector('main') || 
-                             document.querySelector('[role="main"]') ||
-                             document.querySelector('.content') ||
-                             document.body;
-                return main ? main.innerText : '';
-            }
-        """)
-        return str(hash(content))
-    except Exception:
-        return ""
-
-
-def handle_poll_question(page: Page, class_name: str) -> None:
+def handle_poll_question(page, class_name: str) -> None:
     """Extract question, ask Gemma, and click the best answer."""
-    result = extract_from_page(page)
+    result = browser.extract_from_page(page)
     if not result:
-        log("⚠️  Could not extract question from page", class_name)
         return
     
     question, options = result
-    log(f"❓ Question: {question}", class_name)
-    log(f"   Options: {options}", class_name)
     
-    log("🤖 Asking Gemma...", class_name)
+    # Consolidated print as requested
+    log(f"Asking Gemma: Options={options} Question='{question}'", class_name)
+    
     answer = ask_gemma(question, options)
     
+    selected_option_index = None
+
     if answer.status == AnswerStatus.ERROR:
         log(f"❌ AI Error: {answer.reasoning}", class_name)
         notify_low_confidence(question, answer)
-        return
-    
-    confidence_emoji = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(answer.confidence, "⚪")
-    log(f"{confidence_emoji} Answer: Option {answer.option_number} ({answer.confidence} confidence)", class_name)
-    log(f"   Type: {answer.question_type}", class_name)
-    log(f"   Reasoning: {answer.reasoning[:100]}...", class_name)
-    
-    if click_option(page, answer.option_number):
-        log(f"🖱️  Clicked option {answer.option_number}: {options[answer.option_number - 1]}", class_name)
-    else:
-        log(f"❌ Failed to click option {answer.option_number}", class_name)
-    
-    if answer.status == AnswerStatus.LOW_CONFIDENCE:
+    elif answer.confidence == "low":
+        log(f"🔴 Low Confidence: {answer.reasoning[:100]}...", class_name)
         notify_low_confidence(question, answer)
+        selected_option_index = answer.option_number - 1
+    else:
+        # High/Medium confidence
+        confidence_emoji = {"high": "🟢", "medium": "🟡"}.get(answer.confidence, "⚪")
+        log(f"{confidence_emoji} Gemma Response: Confidence={answer.confidence}, Suggested=Option {answer.option_number}", class_name)
+        selected_option_index = answer.option_number - 1
+
+    # iMessage fallback
+    if answer.confidence == "low" or answer.status == AnswerStatus.ERROR:
+        try:
+            from imessage import load_config, send_message, wait_for_reply
+            config = load_config()
+            recipient = config.get("recipient_address")
+            
+            if recipient:
+                # Format message
+                msg_text = f"PollEV Help!\nQ: {question}\n"
+                for i, opt in enumerate(options):
+                    msg_text += f"{i+1}. {opt}\n"
+                msg_text += f"Reply with 1-{len(options)}"
+                
+                if send_message(recipient, msg_text):
+                    log(f"📱 Sent iMessage to {recipient}", class_name)
+                    
+                    reply = wait_for_reply(recipient)
+                    if reply and reply.strip().isdigit():
+                        choice = int(reply.strip())
+                        if 1 <= choice <= len(options):
+                            log(f"📩 Friend replied: Option {choice}", class_name)
+                            selected_option_index = choice - 1
+                        else:
+                             log(f"⚠️ Invalid reply choice: {reply}", class_name)
+                    else:
+                        log("⏰ No validity reply from friend", class_name)
+            else:
+                log("⚠️ No iMessage recipient configured", class_name)
+                
+        except Exception as e:
+            log(f"❌ iMessage error: {e}", class_name)
+            
+    # Final click action
+    if selected_option_index is not None:
+        if browser.click_option(page, selected_option_index + 1):
+             # log(f"🖱️  Clicked option {selected_option_index + 1}", class_name) # Reducing clutter
+             pass
+        else:
+             log(f"❌ Failed to click option {selected_option_index + 1}", class_name)
 
 
-def monitor_page_changes(page: Page, class_name: str, class_info: dict) -> None:
+def monitor_page_changes(page, class_name: str, class_info: dict) -> None:
     """Poll for page changes and handle new questions."""
     global _stop_requested
-    last_hash = get_page_content_hash(page)
+    last_hash = browser.get_page_content_hash(page)
     last_url = page.url
     last_question_handled = None
     end_time = parse_time(class_info.get("end_time", ""))
     
-    log("👁️  Started monitoring for page changes...", class_name)
-    
     # Try to answer initial question
-    result = extract_from_page(page)
+    result = browser.extract_from_page(page)
     if result:
         handle_poll_question(page, class_name)
         last_question_handled = result[0]
@@ -142,21 +132,25 @@ def monitor_page_changes(page: Page, class_name: str, class_info: dict) -> None:
         try:
             current_url = page.url
             if current_url != last_url:
-                log(f"🔄 URL changed: {last_url} → {current_url}", class_name)
+                # log(f"🔄 URL changed", class_name)
                 last_url = current_url
-                last_hash = get_page_content_hash(page)
+                last_hash = browser.get_page_content_hash(page)
                 last_question_handled = None
                 continue
             
-            current_hash = get_page_content_hash(page)
+            current_hash = browser.get_page_content_hash(page)
             if current_hash != last_hash and current_hash:
-                log(f"📝 Page content updated!", class_name)
+                # log(f"📝 Page content updated", class_name)
                 last_hash = current_hash
                 
-                result = extract_from_page(page)
-                if result and result[0] != last_question_handled:
-                    handle_poll_question(page, class_name)
-                    last_question_handled = result[0]
+                result = browser.extract_from_page(page)
+                if result:
+                    if result[0] != last_question_handled:
+                        handle_poll_question(page, class_name)
+                        last_question_handled = result[0]
+                else:
+                    # Question disappeared (poll closed/changed), reset state
+                    last_question_handled = None
                     
         except Exception as e:
             log(f"⚠️  Page state change: {type(e).__name__}", class_name)
@@ -170,24 +164,22 @@ def run_class_session(class_name: str, class_info: dict) -> None:
     section = class_info["section"]
     url = f"{POLLEV_BASE_URL}/{section}"
     
-    log(f"🎓 Starting session", class_name)
-    log(f"   Section: {section}", class_name)
-    log(f"   URL: {url}", class_name)
+    log(f"🎓 Starting session (Section: {section})", class_name)
     
     try:
         with sync_playwright() as playwright:
-            browser, context = create_geolocation_context(playwright, class_info)
+            driver, context = browser.create_geolocation_context(playwright, class_info)
             page = context.new_page()
             
             try:
                 page.goto(url)
-                log(f"📍 Opened with spoofed location", class_name)
+                # log(f"📍 Opened with spoofed location", class_name)
                 
                 monitor_page_changes(page, class_name, class_info)
                 
             finally:
                 context.close()
-                browser.close()
+                driver.close()
                 
     except Exception as e:
         log(f"❌ Session error: {e}", class_name)
@@ -231,7 +223,7 @@ def main():
     log("=" * 60)
     log("PollEV Multi-Class Monitor Started")
     log("=" * 60)
-    log("💡 Press ENTER to stop all sessions gracefully")
+    log("💡 Type 'exit' and press ENTER to stop all sessions gracefully")
     
     classes = load_classes()
     log(f"Loaded {len(classes)} class(es): {', '.join(classes.keys())}")
@@ -244,32 +236,8 @@ def main():
         for class_name, class_info in active_classes:
             start_class_session(class_name, class_info)
         
-        # Log status periodically
-        with _sessions_lock:
-            if _active_sessions:
-                pass  # Sessions are running, just keep checking
-            elif not active_classes:
-                # Find next class
-                next_class = None
-                next_seconds = float('inf')
-                now = datetime.now()
-                
-                for name, info in classes.items():
-                    start = parse_time(info.get("start_time", ""))
-                    if start:
-                        start_dt = now.replace(
-                            hour=start.hour, minute=start.minute, second=start.second, microsecond=0
-                        )
-                        if start_dt > now:
-                            diff = (start_dt - now).total_seconds()
-                            if diff < next_seconds:
-                                next_seconds = diff
-                                next_class = name
-                
-                if next_class and next_seconds < float('inf'):
-                    log(f"⏳ Next class: {next_class} in {next_seconds/60:.1f} minutes")
-                else:
-                    log("📅 No more classes scheduled. Waiting...")
+        # Log status periodically is removed to reduce chatter
+        # just waiting...
         
         time_module.sleep(10)  # Check every 10 seconds
     
@@ -286,11 +254,15 @@ def main():
 
 if __name__ == "__main__":
     def input_listener():
-        """Listen for Enter key to trigger graceful shutdown."""
+        """Listen for 'exit' command to trigger graceful shutdown."""
         global _stop_requested
+        print("   (Type 'exit' and press Enter to stop)")
         try:
-            input()
-            _stop_requested = True
+            while not _stop_requested:
+                cmd = input()
+                if cmd.strip().lower() in ["exit", "quit", "stop"]:
+                    _stop_requested = True
+                    break
         except EOFError:
             pass
     

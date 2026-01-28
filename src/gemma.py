@@ -67,7 +67,13 @@ OPTIONS:
 {options_list}
 
 INSTRUCTIONS:
-Analyze the question and provide a structured JSON response. You MUST ALWAYS provide your best answer, even if the question is subjective or requires outside knowledge. Make your best educated guess.
+Analyze the question and provide a structured JSON response. You MUST ALWAYS provide your best answer (integer 1-{len(options)}), even if the question is subjective or requires outside knowledge.
+
+CONFIDENCE RULES (STRICT):
+- "high": The question is completely self-contained, objective, and you are >95% sure of the answer.
+- "medium": The question is self-contained but might have minor ambiguity, or you are >70% sure.
+- "low": The question requires external context (e.g. "shown on the board", "this diagram", "previous slide", "what did the speaker say"), OR is highly subjective, OR you are guessing. 
+- IMPORTANT: If a question asks about "the correct node", "this code", or "the image", and no code/image is provided, you MUST set confidence to "low".
 
 RESPONSE FORMAT (respond with ONLY this JSON, no other text):
 {{
@@ -92,6 +98,19 @@ EXAMPLE for "What is 2+2?" with options ["3", "4", "5", "6"]:
     "best_option": 2,
     "confidence": "high",
     "explanation": "4 is the mathematically correct answer"
+  }}
+}}
+
+EXAMPLE for "What is the correct node?" (with no diagram):
+{{
+  "analysis": {{
+    "question_type": "requires_context",
+    "reasoning": "The question refers to 'the correct node' but no graph or diagram is provided."
+  }},
+  "answer": {{
+    "best_option": 1,
+    "confidence": "low",
+    "explanation": "Guessing Option 1 because context is missing."
   }}
 }}
 

@@ -1,76 +1,40 @@
-# PollEV Auto-Attendant
+# Skipping Lecture
 
-Automatically attend PollEV sessions with AI-powered question answering.
+Automated PollEV answering bot with AI support and iMessage fallback.
 
-## Setup
+## Quick Start
 
-### 1. Install Dependencies
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install playwright google-generativeai beautifulsoup4 lxml
-playwright install chromium
-```
+1. **Setup**: Download packages and configure API keys, classes, and contacts.
+   ```bash
+   python init.py
+   ```
 
-### 2. Add Your API Key
-Create a file `data/API_KEY_GEMINI` containing your Google Gemini API key:
-```bash
-echo "your-api-key-here" > data/API_KEY_GEMINI
-```
+2. **Run**: Start the automation (handles login and monitoring).
+   ```bash
+   python run.py
+   ```
 
-### 3. Configure Your Classes
-Edit `data/classes.json` with your class details:
-```json
-{
-    "CS_4782": {
-        "section": "jaywujun701",
-        "longitude": 42.447083,
-        "latitude": -76.482222,
-        "start_time": "",
-        "end_time": ""
-    }
-}
-```
-- `section`: The presenter's PollEV username (from pollev.com/**section**)
-- `longitude/latitude`: GPS coordinates to spoof (for geofenced polls)
-- `start_time/end_time`: When to automatically join (leave empty to join immediately)
+   To run with helper/test mode (5s delay on iMessage listener):
+   ```bash
+   python run.py -test
+   ```
 
-### 4. Login Manually
-```bash
-python src/login.py
-```
-Log in manually in the browser, then press Enter in the terminal to save your login session token.
+## Detailed System Behavior
 
----
+1. **Multi-Class Monitoring**:
+   - The system checks your `classes.json` schedule.
+   - It only launches browsers for classes that are currently "active" (within start/end time) or have no start time.
+   - It creates a separate, isolated browser session for each class, spoofing the configured geolocation (Lat/Lon) to bypass attendance checks.
 
-## Usage
+2. **AI Answering (Gemma)**:
+   - When a poll question appears, the bot grabs the text and options.
+   - It asks **Google Gemma 3 27b** for the best answer.
+   - **High/Medium Confidence**: If Gemma is sure, the bot auto-clicks the answer immediately.
+   - **Low Confidence/Error**: If the question is ambiguous (e.g., "What is the answer to the question on the board?"), Gemma flags it as "Low Confidence".
 
-### Run the Monitor
-```bash
-python src/monitor.py
-```
+3. **Human-in-the-loop (iMessage Fallback)**:
+   - If confidence is **Low**, the bot sends an **iMessage** to your configured recipient (e.g., a friend in class).
+   - The message contains the Question and Numbered Options.
+   - The bot waits for a reply (e.g., "3").
+   - Once received, it clicks the corresponding option (Option 3).
 
-The monitor will:
-1. ⏰ Wait until class `start_time`
-2. 🌐 Open PollEV with spoofed GPS location
-3. 👁️ Watch for new poll questions
-4. 🤖 Ask Gemma AI for the best answer
-5. 🖱️ Click the answer automatically
-6. 🔔 Send a Mac notification if confidence is low
-
-### Stop the Monitor
-Press **Enter** in the terminal for a graceful shutdown.
-
----
-
-## Notifications
-
-| Confidence | Behavior |
-|------------|----------|
-| 🟢 High | Clicks silently |
-| 🟡 Medium | Clicks silently |
-| 🔴 Low | Clicks + Mac notification |
-| ❌ Error | Notification only |
-
-To make notifications **persist until dismissed**:
-- System Settings → Notifications → Terminal → Change to "Alerts"
